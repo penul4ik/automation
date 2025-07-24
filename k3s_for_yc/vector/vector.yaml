@@ -1,0 +1,23 @@
+sources:
+  wordpress_logs:
+    type: exec
+    command: ["ssh", "penul4ikz@51.250.105.129", "sudo", "kubectl", "logs", "-l", "app=wordpress", "--tail=100"]
+    mode: scheduled
+    scheduled:
+      exec_interval_secs: 5
+
+      #transforms:
+      #parse_lines:
+      #type: remap
+      #inputs: 
+      #- wordpress_logs
+      #source: . |= parse_syslog!(.message)
+
+sinks:
+  local_file:
+    type: file
+    inputs:
+      - wordpress_logs
+    path: /home/mkonovalenko/wordpress-logs/wp-%Y-%m-%d.log
+    encoding:
+      codec: text

@@ -1,0 +1,118 @@
+---
+- name: Установка зависимостей
+  apt:
+    name:
+      - curl
+      - ufw
+    state: present
+    update_cache: yes
+
+- name: Открываем порты 22, 80, 443 в ufw
+  ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+  loop:
+    - 22
+    - 80
+    - 443
+
+- name: Включаем ufw
+  ufw:
+    state: enabled
+    policy: deny
+
+- name: Отключаем swap
+  command: swapoff -a
+
+- name: Удаляем swap из fstab
+  replace:
+    path: /etc/fstab
+    regexp: '^(?!#).*?\bswap\b.*$'
+    replace: '# \g<0>'
+
+- name: Устанавливаем K3s без Traefik
+  shell: curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--disable traefik" sh -
+  args:
+    creates: /etc/rancher/k3s/k3s.yaml
+
+- name: Копируем kubeconfig в ~/.kube/config
+  copy:
+    src: /etc/rancher/k3s/k3s.yaml
+    dest: /home/{{ ansible_user }}/.kube/config
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: '0600'
+    remote_src: true
+
+- name: Создаём директории под манифесты
+  file:
+    path: /home/{{ ansible_user }}/wordpress
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: '0755'
+
+- name: Копируем манифесты на удалённую машину
+  template:
+    src: "{{ item }}"
+    dest: "/home/{{ ansible_user }}/wordpress/{{ item }}"
+  loop:
+    - cluster-issuer.yaml.j2
+    - mysql.yaml.j2
+    - pvc.yaml.j2
+    - wordpress.yaml.j2
+    - wordpress-ingress.yaml.j2
+
+- name: Устанавливаем ingress-nginx
+  shell: |
+    KUBECONFIG=/etc/rancher/k3s/k3s.yaml \
+    kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.10.1/deploy/static/provider/cloud/deploy.yaml
+  args:
+    creates: /var/lib/rancher/k3s/server/manifests/ingress-nginx.yaml
+
+- name: Устанавливаем cert-manager
+  shell: |
+    KUBECONFIG=/etc/rancher/k3s/k3s.yaml \
+    kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.15.0/cert-manager.yaml
+  args:
+    creates: /var/lib/rancher/k3s/server/manifests/cert-manager.yaml
+
+- name: Устанавливаем local-path storage
+  shell: |
+    KUBECONFIG=/etc/rancher/k3s/k3s.yaml \
+    kubectl apply -f https://raw.githubusercontent.com/rancher/local-path-provisioner/master/deploy/local-path-storage.yaml
+  args:
+    creates: /var/lib/rancher/k3s/server/manifests/local-path.yaml
+
+- name: Делаем local-path классом хранения по умолчанию
+  shell: |
+    KUBECONFIG=/etc/rancher/k3s/k3s.yaml \
+    kubectl patch storageclass local-path -p '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'
+
+
+- name: Применяем манифесты kubectl apply
+  shell: |
+    KUBECONFIG=/etc/rancher/k3s/k3s.yaml kubectl apply -f /home/{{ ansible_user }}/wordpress/{{ item }}
+  loop:
+    - cluster-issuer.yaml
+    - mysql.yaml
+    - pvc.yaml
+    - wordpress.yaml
+    - wordpress-ingress.yaml
+
+- name: Копируем скрипт бэкапа
+  template:
+    src: backup.sh.j2
+    dest: /usr/local/bin/wordpress-backup.sh
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Устанавливаем cron на backup
+  cron:
+    name: "wordpress daily backup"
+    job: "/usr/local/bin/wordpress-backup.sh"
+    minute: "0"
+    hour: "2"
+

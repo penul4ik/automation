@@ -1,0 +1,15 @@
+---
+domain_name: candidate-konovalenko.ru
+
+db_root_password: password
+db_host: mysql
+db_name: wordpress
+db_user: wpuser
+db_password: wppassword
+
+storage_size: 10Gi
+
+email: maksimpenul@gmail.com
+
+backup_dir: /var/backup
+backup: /var

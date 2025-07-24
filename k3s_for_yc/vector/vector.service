@@ -1,0 +1,5 @@
+[Service]
+ExecStart=/usr/bin/vector --config /var/lib/vector/vector.yaml
+Restart=always
+RestartSec=5
+Environment=PATH=/usr/bin:/bin:/usr/local/bin
